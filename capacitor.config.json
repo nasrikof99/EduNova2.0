@@ -1,0 +1,6 @@
+{
+  "appId": "my.edunova.app",
+  "appName": "EduNova",
+  "webDir": "dist",
+  "plugins": {"LocalNotifications": {"iconColor": "#6157E8"}}
+}

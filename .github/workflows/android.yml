@@ -1,53 +1,111 @@
-name: Bina APK EduNova
+name: Bina APK EduNova (Dibaiki)
+
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
-    paths-ignore: ['README.md']
+    paths-ignore:
+      - 'README.md'
+
+permissions:
+  contents: read
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 45
     steps:
-      - name: Dapatkan kod
+      - name: 1 - Ambil fail daripada GitHub
         uses: actions/checkout@v4
-      - name: Sediakan Node.js
+
+      - name: 2 - Semak susunan fail
+        shell: bash
+        run: |
+          echo "Direktori projek: $(pwd)"
+          if [ ! -f package.json ]; then
+            echo "::error::Fail package.json tidak ditemui di ROOT repository. Pastikan index.html dan package.json bukan di dalam subfolder EduNova."
+            find . -maxdepth 3 -name package.json -print
+            exit 1
+          fi
+          if [ ! -f src/native.js ] || [ ! -f public/app.js ]; then
+            echo "::error::Folder src atau public tidak lengkap. Sila muat naik SEMUA fail ZIP projek."
+            exit 1
+          fi
+          node --version
+          echo "Struktur projek OK"
+
+      - name: 3 - Sediakan Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Sediakan Java 21
+
+      - name: 4 - Sediakan Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - name: Sediakan Android SDK
+
+      - name: 5 - Sediakan Android SDK
         uses: android-actions/setup-android@v3
-      - name: Pasang pakej
+
+      - name: 6 - Pasang Android API 36
+        shell: bash
+        run: |
+          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+      - name: 7 - Pasang pakej npm
         run: npm install --no-audit --no-fund
-      - name: Bina web dan Android
+
+      - name: 8 - Bina aplikasi web
+        run: npm run build
+
+      - name: 9 - Hasilkan projek Android
+        shell: bash
         run: |
-          npm run build
           npx cap add android
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('android/app/src/main/AndroidManifest.xml')
-          s=p.read_text()
-          perms = ('    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n'
-                   '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n'
-                   '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n')
-          s=s.replace('    <application',perms+'    <application',1)
-          p.write_text(s)
-          PY
           npx cap sync android
-      - name: Kompil APK Debug
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text(encoding='utf-8')
+          permissions = [
+              'android.permission.RECORD_AUDIO',
+              'android.permission.POST_NOTIFICATIONS',
+              'android.permission.SCHEDULE_EXACT_ALARM',
+          ]
+          missing = ''.join(
+              '    <uses-permission android:name="' + value + '" />\n'
+              for value in permissions if 'android:name="' + value + '"' not in s
+          )
+          if missing:
+              if '    <application' not in s:
+                  raise RuntimeError('Tag <application> tiada dalam AndroidManifest.xml')
+              s = s.replace('    <application', missing + '    <application', 1)
+              p.write_text(s, encoding='utf-8')
+          print('AndroidManifest.xml selesai disemak')
+          PYCODE
+
+      - name: 10 - Kompil APK (papar ralat terperinci)
+        shell: bash
+        working-directory: android
         run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-      - name: Muat naik APK
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace --console=plain 2>&1 | tee ../gradle-build.log
+
+      - name: 11 - Muat naik APK siap
         uses: actions/upload-artifact@v4
         with:
           name: EduNova-Android-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
           retention-days: 30
+
+      - name: Log ralat (jika gagal)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EduNova-Log-Ralat
+          path: gradle-build.log
+          if-no-files-found: ignore
+          retention-days: 7

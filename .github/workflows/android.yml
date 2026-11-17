@@ -45,14 +45,42 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: 5 - Sediakan Android SDK
-        uses: android-actions/setup-android@v3
+      # Gunakan sdkmanager yang SUDAH dipasang pada Ubuntu runner.
+      # setup-android@v3 sengaja dibuang: ia memuat turun tools 16 dan
+      # boleh tersekat pada soalan lesen y/N dalam GitHub Actions.
+      - name: 5 - Terima lesen Android SDK (automatik)
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDK_MANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDK_MANAGER" ]; then
+            echo "::error::sdkmanager tiada di $SDK_MANAGER. Sila kongsi log langkah ini."
+            exit 1
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "Android SDK: $SDK_ROOT"
+          "$SDK_MANAGER" --version
+          # Dalam GitHub Actions, shell bash berjalan dengan pipefail.
+          # 'yes' boleh tamat dengan SIGPIPE (kod 141) walaupun SDK berjaya.
+          # Matikan pipefail HANYA untuk pipeline ini supaya exit code
+          # yang dinilai ialah exit code sdkmanager, bukan arahan yes.
+          set +o pipefail
+          yes | "$SDK_MANAGER" --licenses
+          set -o pipefail
+          echo "Penerimaan lesen SDK selesai."
 
       - name: 6 - Pasang Android API 36
         shell: bash
         run: |
-          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
-          echo "ANDROID_HOME=$ANDROID_HOME"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'platform-tools'
+          test -d "$ANDROID_SDK_ROOT/platforms/android-36"
+          test -d "$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          echo "Android API 36 dan Build Tools 36.0.0 tersedia."
 
       - name: 7 - Pasang pakej npm
         run: npm install --no-audit --no-fund
